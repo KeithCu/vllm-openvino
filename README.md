@@ -1,64 +1,221 @@
 ## Installation
 
-vLLM powered by OpenVINO supports all LLM models from [vLLM supported models list](#supported-models) and can perform optimal model serving on all x86-64 CPUs with, at least, AVX2 support, as well as on both integrated and discrete Intel® GPUs ([the list of supported GPUs](https://docs.openvino.ai/2024/about-openvino/release-notes-openvino/system-requirements.html#gpu)).
+vLLM powered by OpenVINO supports all LLM models from the official vLLM supported models list and can perform optimal model serving on:
+- All x86-64 CPUs with at least AVX2 support
+- Integrated and discrete Intel® GPUs (see the OpenVINO supported GPU list)
+- (Where available) Intel® NPUs via OpenVINO
 
 > [!NOTE]
-> There are no pre-built wheels or images for this device, so you must build vLLM from source.
+> There are no pre-built wheels or Docker images for this integration; you must install from source.
 
 ## Requirements
 
-- OS: Linux
-- Instruction set architecture (ISA) requirement: at least AVX2.
+- Linux
+- x86-64 CPU with AVX2
+- Python 3.x
+- For GPU/NPU acceleration:
+  - Intel GPU/NPU drivers and runtime (e.g. `intel-compute-runtime`, `oneapi-level-zero`)
+  - OpenVINO runtime
+- Recommended / validated example:
+  - Arch Linux
+  - Intel Core Ultra 7 258V (Lunar Lake)
+  - 32GB RAM (shared with GPU/NPU)
+  - `intel_gpu_top` available for GPU monitoring
 
-## Set up using Python
+To use vLLM OpenVINO backend with a GPU, ensure your system is properly configured:
+https://docs.openvino.ai/2024/get-started/configurations/configurations-intel-gpu.html
 
-### Pre-built wheels
+---
 
-Currently, there are no pre-built OpenVINO wheels.
+## Install vLLM with OpenVINO backend (Python)
 
-### Build wheel from source
+There are currently no pre-built OpenVINO wheels; build and install from source.
 
-First, install Python and ensure you have the latest pip. For example, on Ubuntu 22.04, you can run:
+1. Ensure Python and pip are available. For example, on Ubuntu 22.04:
 
-```console
-sudo apt-get update  -y
-sudo apt-get install python3-pip
+```bash
+sudo apt-get update -y
+sudo apt-get install -y python3-pip
 pip install --upgrade pip
 ```
 
-Second, clone vllm-openvino and install prerequisites for the vLLM OpenVINO backend installation:
+2. Clone this repository:
 
-```console
+```bash
 git clone https://github.com/vllm-project/vllm-openvino.git
 cd vllm-openvino
 ```
 
-Finally, install vLLM with OpenVINO backend:
+3. Install vLLM with OpenVINO backend:
 
-```console
+```bash
 VLLM_TARGET_DEVICE="empty" PIP_EXTRA_INDEX_URL="https://download.pytorch.org/whl/cpu" python -m pip install -v .
 ```
 
 > [!NOTE]
-> In x86, triton will be installed by vllm. But in OpenVINO, triton doesn't work correctly. we need to uninstall it via `python3 -m pip uninstall -y triton`
+> Triton is installed by upstream vLLM on x86, but is not compatible with the OpenVINO backend. Uninstall it:
+> ```bash
+> python3 -m pip uninstall -y triton
+> ```
 
-> [!NOTE]
-To use vLLM OpenVINO backend with a GPU device, ensure your system is properly set up. Follow the instructions provided here: [https://docs.openvino.ai/2024/get-started/configurations/configurations-intel-gpu.html](https://docs.openvino.ai/2024/get-started/configurations/configurations-intel-gpu.html).
+---
 
-## Set up using Docker
+## Prepare an OpenVINO model (required before serving)
 
-### Pre-built images
+Before starting the vLLM server with the OpenVINO backend, you MUST provide a model in OpenVINO IR or compatible exported format. Typical workflow:
 
-Currently, there are no pre-built OpenVINO images.
+1. Choose a model from Hugging Face or a local path.
+2. Export/quantize it to OpenVINO format using `optimum-cli`.
 
-### Build image from source
+### Install export tools
 
-```console
-docker build . -t vllm-openvino-env .
-docker run -it --rm vllm-openvino-env
+```bash
+pip install "optimum[openvino,nncf]" transformers torch
 ```
 
-## Extra information
+### Export a Hugging Face model to OpenVINO (INT4 example)
+
+Use `optimum-cli export openvino` to create an optimized OpenVINO model directory:
+
+```bash
+optimum-cli export openvino \
+  --model <HF_MODEL_ID> \
+  --task text-generation-with-past \
+  --weight-format int4 \
+  --sym \
+  --ratio 0.8 \
+  --group-size 128 \
+  --trust-remote-code \
+  <OUTPUT_DIR>
+```
+
+Examples:
+
+Llama 3.2 3B Instruct:
+
+```bash
+optimum-cli export openvino \
+  --model meta-llama/Llama-3.2-3B-Instruct \
+  --task text-generation-with-past \
+  --weight-format int4 \
+  --sym \
+  --ratio 0.8 \
+  --group-size 128 \
+  --trust-remote-code \
+  Llama3.2-3B-ov
+```
+
+Gemma 2 9B:
+
+```bash
+optimum-cli export openvino \
+  --model google/gemma-2-9b-it \
+  --task text-generation-with-past \
+  --weight-format int4 \
+  --sym \
+  --ratio 0.8 \
+  --group-size 128 \
+  --trust-remote-code \
+  Gemma2-9B-ov
+```
+
+> [!TIP]
+> For maximum quality, consider `--awq --dataset wikitext2` instead of `--sym` (adds 10–30 minutes of calibration).
+
+### Recommended models (examples)
+
+Example, well-performing choices when exported with INT4:
+
+| Model            | HF ID                              | Size | Quant | Quality | Speed (GPU, approx) | Use Case                    |
+|------------------|------------------------------------|------|-------|---------|---------------------|-----------------------------|
+| Dolphin 3.0 8B   | `dphn/Dolphin3.0-Llama3.1-8B`     | 8B   | INT4  | ★★★★★   | 25–35 t/s           | General, coding, uncensored |
+| Llama 3.2 3B     | `meta-llama/Llama-3.2-3B-Instruct`| 3B   | INT4  | ★★★★☆   | 40–50 t/s           | Fast chat, edge             |
+| Gemma 2 9B       | `google/gemma-2-9b-it`            | 9B   | INT4  | ★★★★★   | 20–30 t/s           | Reasoning, math             |
+| Phi-3.5 Mini     | `microsoft/Phi-3.5-mini-instruct` | 3.8B | INT4  | ★★★★☆   | 35–45 t/s           | Efficient, high quality     |
+| Qwen 2.5 7B      | `Qwen/Qwen2.5-7B-Instruct`        | 7B   | INT4  | ★★★★★   | 25–35 t/s           | Multilingual, strong        |
+
+### Using the Dolphin3-ov example
+
+This repository includes a `Dolphin3-ov/` folder as a concrete example of a prepared OpenVINO model. You can use it directly with the serving instructions below to validate your setup.
+
+### About GGUF
+
+- GGUF (llama.cpp) is NOT the same as OpenVINO IR and cannot be used directly.
+- You can attempt conversion from a local GGUF file:
+
+```bash
+optimum-cli export openvino \
+  --model ./models/llama-3.2-3b-instruct-q4_k_m.gguf \
+  --task text-generation-with-past \
+  --weight-format int4 \
+  Llama3.2-3B-gguf-ov
+```
+
+- However, GGUF → IR may lose metadata; prefer exporting directly from the original Hugging Face model.
+
+---
+
+## Serve an OpenVINO model with vLLM
+
+Once you have an exported OpenVINO model directory (e.g. `Dolphin3-ov`, `Llama3.2-3B-ov`), start the vLLM OpenAI-compatible server.
+
+### Generic serving command
+
+```bash
+export VLLM_OPENVINO_DEVICE=GPU    # or CPU
+export VLLM_OPENVINO_KVCACHE_SPACE=16
+export VLLM_OPENVINO_KV_CACHE_PRECISION=i8
+export VLLM_OPENVINO_ENABLE_QUANTIZED_WEIGHTS=ON
+
+python -m vllm.entrypoints.openai.api_server \
+  --model <OUTPUT_DIR> \
+  --dtype auto \
+  --host 0.0.0.0 \
+  --port 8000 \
+  --gpu-memory-utilization 0.8 \
+  --max-model-len 8192
+```
+
+### Quick start: Dolphin3-ov
+
+```bash
+export VLLM_OPENVINO_DEVICE=GPU
+export VLLM_OPENVINO_KV_CACHE_PRECISION=i8
+export VLLM_OPENVINO_ENABLE_QUANTIZED_WEIGHTS=ON
+export VLLM_OPENVINO_KVCACHE_SPACE=16
+
+python -m vllm.entrypoints.openai.api_server \
+  --model Dolphin3-ov \
+  --dtype auto \
+  --host 0.0.0.0 \
+  --port 8000 \
+  --gpu-memory-utilization 0.8 \
+  --max-model-len 8192
+```
+
+This configuration has been validated on Arch Linux + Intel Core Ultra 7 258V (Lunar Lake).
+
+---
+
+## Use with OpenWebUI and OpenAI-compatible clients
+
+### OpenWebUI
+
+1. OpenWebUI → Admin Panel → Connections → Add OpenAI:
+   - Name: `vLLM-OpenVINO`
+   - API Base: `http://localhost:8000/v1`
+   - API Key: leave blank or a dummy if required
+2. Models → Add Custom Model:
+   - Connection: `vLLM-OpenVINO`
+   - Model ID: name matching the `--model` you serve (e.g. `Dolphin3-ov`, `Llama3.2-3B-ov`)
+
+### Other OpenAI-compatible clients
+
+Configure:
+- Base URL: `http://localhost:8000/v1`
+- Model: same as the `--model` directory or alias.
+
+---
 
 ## Supported features
 
@@ -68,52 +225,146 @@ OpenVINO vLLM backend supports the following advanced vLLM features:
 - Chunked prefill (`--enable-chunked-prefill`)
 
 > [!NOTE]
-> Simultaneous usage of both --enable-prefix-caching and --enable-chunked-prefill is not yet implemented.
+> Simultaneous usage of both `--enable-prefix-caching` and `--enable-chunked-prefill` is not yet implemented.
 
 > [!NOTE]
-> --enable-chunked-prefill is broken on openvino==2025.2, to use this feature update openvino to a nightly 2025.3 release or openvino==2025.1.
+> `--enable-chunked-prefill` is broken on `openvino==2025.2`. To use this feature, update OpenVINO to a nightly 2025.3 build or use `openvino==2025.1`.
+
+---
 
 ## Performance tips
 
-### vLLM OpenVINO backend environment variables
+### Core environment variables
 
-- `VLLM_OPENVINO_DEVICE` to specify which device utilize for the inference. If there are multiple GPUs in the system, additional indexes can be used to choose the proper one (e.g, `VLLM_OPENVINO_DEVICE=GPU.1`). If the value is not specified, CPU device is used by default.
-- `VLLM_OPENVINO_ENABLE_QUANTIZED_WEIGHTS=ON` to enable U8 weights compression during model loading stage. By default, compression is turned off. You can also export model with different compression techniques using `optimum-cli` and pass exported folder as `<model_id>`
-- `VLLM_USE_V1` to enable V1 vLLM API, e.g, `VLLM_USE_V1=1`
+- `VLLM_OPENVINO_DEVICE`
+  - Target device: `CPU`, `GPU`, `GPU.X`, `NPU` (if available).
+- `VLLM_OPENVINO_ENABLE_QUANTIZED_WEIGHTS=ON`
+  - Enable U8 weights compression during model loading when supported.
+- `VLLM_USE_V1=1`
+  - Enable vLLM V1 API (if desired).
 
 ### CPU performance tips
 
-CPU uses the following environment variables to control behavior:
+- `VLLM_OPENVINO_KVCACHE_SPACE`
+  - KV cache size in GB (e.g. `40` = 40 GB). Larger values allow more parallel requests.
+- `VLLM_OPENVINO_KV_CACHE_PRECISION=u8`
+  - Default; reduces memory footprint.
 
-- `VLLM_OPENVINO_KVCACHE_SPACE` to specify the KV Cache size (e.g, `VLLM_OPENVINO_KVCACHE_SPACE=40` means 40 GB space for KV cache), larger setting will allow vLLM running more requests in parallel. This parameter should be set based on the hardware configuration and memory management pattern of users.
-- `VLLM_OPENVINO_KV_CACHE_PRECISION=u8` to control KV cache precision. `u8` precision is used by default.
+For improved TPOT / TTFT latency, you can use chunked prefill. Example:
 
-To enable better TPOT / TTFT latency, you can use vLLM's chunked prefill feature (`--enable-chunked-prefill`). Based on the experiments, the recommended batch size is `256` (`--max-num-batched-tokens`)
-
-OpenVINO best known configuration for CPU is:
-
-```console
-$ VLLM_OPENVINO_KVCACHE_SPACE=100 VLLM_OPENVINO_KV_CACHE_PRECISION=u8 VLLM_OPENVINO_ENABLE_QUANTIZED_WEIGHTS=ON \
-    python3 vllm/benchmarks/benchmark_throughput.py --model meta-llama/Llama-2-7b-chat-hf --dataset vllm/benchmarks/ShareGPT_V3_unfiltered_cleaned_split.json --enable-chunked-prefill --max-num-batched-tokens 256
+```bash
+VLLM_OPENVINO_KVCACHE_SPACE=100 \
+VLLM_OPENVINO_KV_CACHE_PRECISION=u8 \
+VLLM_OPENVINO_ENABLE_QUANTIZED_WEIGHTS=ON \
+python3 vllm/benchmarks/benchmark_throughput.py \
+  --model meta-llama/Llama-2-7b-chat-hf \
+  --dataset vllm/benchmarks/ShareGPT_V3_unfiltered_cleaned_split.json \
+  --enable-chunked-prefill \
+  --max-num-batched-tokens 256
 ```
 
 ### GPU performance tips
 
-GPU device implements the logic for automatic detection of available GPU memory and, by default, tries to reserve as much memory as possible for the KV cache (taking into account `gpu_memory_utilization` option). However, this behavior can be overridden by explicitly specifying the desired amount of memory for the KV cache using `VLLM_OPENVINO_KVCACHE_SPACE` environment variable (e.g, `VLLM_OPENVINO_KVCACHE_SPACE=8` means 8 GB space for KV cache).
+- By default, GPU backend:
+  - Detects available memory
+  - Reserves KV cache according to `gpu_memory_utilization`
+- To override:
+  - `VLLM_OPENVINO_KVCACHE_SPACE=8` → 8 GB for KV cache
+- Use `VLLM_OPENVINO_KV_CACHE_PRECISION` (e.g. `i8`, `fp16`) to trade off memory vs. quality.
 
-Additionally, GPU device supports `VLLM_OPENVINO_KV_CACHE_PRECISION` (e.g. `i8` or `fp16`) to control KV cache precision (default value is device-specific).
+Example best-known configuration:
 
-Currently, the best performance using GPU can be achieved with the default vLLM execution parameters for models with quantized weights (8 and 4-bit integer data types are supported) and `preemption-mode=swap`.
-
-OpenVINO best known configuration for GPU is:
-
-```console
-$ VLLM_OPENVINO_DEVICE=GPU VLLM_OPENVINO_KV_CACHE_PRECISION=i8 VLLM_OPENVINO_ENABLE_QUANTIZED_WEIGHTS=ON \
-    python3 vllm/benchmarks/benchmark_throughput.py --model meta-llama/Llama-2-7b-chat-hf --dataset vllm/benchmarks/ShareGPT_V3_unfiltered_cleaned_split.json
+```bash
+VLLM_OPENVINO_DEVICE=GPU \
+VLLM_OPENVINO_KV_CACHE_PRECISION=i8 \
+VLLM_OPENVINO_ENABLE_QUANTIZED_WEIGHTS=ON \
+python3 vllm/benchmarks/benchmark_throughput.py \
+  --model meta-llama/Llama-2-7b-chat-hf \
+  --dataset vllm/benchmarks/ShareGPT_V3_unfiltered_cleaned_split.json
 ```
+
+---
+
+## GPU monitoring & troubleshooting
+
+### Confirm GPU is used
+
+```bash
+sudo intel_gpu_top
+```
+
+You should see:
+- Render/3D utilization during generation
+- Corresponding power usage
+
+### If GPU/NPU not detected
+
+Check OpenVINO devices:
+
+```bash
+python -c "import openvino as ov; print(ov.Core().available_devices)"
+```
+
+Expected: `['CPU', 'GPU']` or `['CPU', 'GPU', 'NPU']`.
+
+If missing (example for Arch-based systems):
+
+```bash
+sudo pacman -S intel-compute-runtime oneapi-level-zero
+sudo usermod -aG render $USER
+# Reboot
+```
+
+Ensure the appropriate runtime and groups are configured for your distribution.
+
+---
+
+## Automate with script (optional)
+
+Example helper script to start the server:
+
+```bash
+#!/bin/bash
+export VLLM_OPENVINO_DEVICE=GPU
+export VLLM_OPENVINO_KV_CACHE_PRECISION=i8
+export VLLM_OPENVINO_ENABLE_QUANTIZED_WEIGHTS=ON
+export VLLM_OPENVINO_KVCACHE_SPACE=16
+
+python -m vllm.entrypoints.openai.api_server \
+  --model "$1" \
+  --dtype auto \
+  --host 0.0.0.0 \
+  --port 8000 \
+  --gpu-memory-utilization 0.8 \
+  --max-model-len 8192
+```
+
+Usage:
+
+```bash
+./start_vllm.sh Dolphin3-ov
+```
+
+---
 
 ## Limitations
 
 - LoRA serving is not supported.
-- Only LLM models are currently supported. LLaVa and encoder-decoder models are not currently enabled in vLLM OpenVINO integration.
-- Tensor and pipeline parallelism are not currently enabled in vLLM integration.
+- Only decoder-style LLMs are currently supported. LLaVA and encoder-decoder models are not enabled in this integration.
+- Tensor and pipeline parallelism are not currently enabled.
+
+---
+
+## Summary (quick reference)
+
+- Prepare (required):
+  - `optimum-cli export openvino --model <id> --task text-generation-with-past --weight-format int4 --sym --ratio 0.8 --group-size 128 <dir>`
+- Serve:
+  - `python -m vllm.entrypoints.openai.api_server --model <dir> --port 8000 --host 0.0.0.0`
+- Integrate:
+  - Point OpenWebUI / OpenAI-compatible clients to `http://localhost:8000/v1` with the chosen model ID.
+
+Validated on Arch Linux + Intel Lunar Lake (Core Ultra 7 258V, 32GB RAM), but intended to be generic for Linux + Intel CPU/GPU setups.
+
+**Made with ❤️ on Arch Linux + Intel Lunar Lake**  
+*Tested on Core Ultra 7 258V, 32GB RAM, OpenVINO 2025.3, vLLM 0.8.4*
