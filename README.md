@@ -91,32 +91,32 @@ optimum-cli export openvino \
 
 Examples:
 
-Llama 3.2 3B Instruct:
+Llama 3.3 8B Instruct:
 
 ```bash
 optimum-cli export openvino \
-  --model meta-llama/Llama-3.2-3B-Instruct \
+  --model meta-llama/Llama-3.3-8B-Instruct \
   --task text-generation-with-past \
   --weight-format int4 \
   --sym \
   --ratio 0.8 \
   --group-size 128 \
   --trust-remote-code \
-  Llama3.2-3B-ov
+  Llama3.3-8B-ov
 ```
 
-Gemma 2 9B:
+Mistral-Nemo 12B:
 
 ```bash
 optimum-cli export openvino \
-  --model google/gemma-2-9b-it \
+  --model mistralai/Mistral-Nemo-Instruct-2407 \
   --task text-generation-with-past \
   --weight-format int4 \
   --sym \
   --ratio 0.8 \
   --group-size 128 \
   --trust-remote-code \
-  Gemma2-9B-ov
+  Mistral-Nemo-12B-ov
 ```
 
 > [!TIP]
@@ -128,11 +128,12 @@ Example, well-performing choices when exported with INT4:
 
 | Model            | HF ID                              | Size | Quant | Quality | Speed (GPU, approx) | Use Case                    |
 |------------------|------------------------------------|------|-------|---------|---------------------|-----------------------------|
-| Dolphin 3.0 8B   | `dphn/Dolphin3.0-Llama3.1-8B`     | 8B   | INT4  | ★★★★★   | 25–35 t/s           | General, coding, uncensored |
-| Llama 3.2 3B     | `meta-llama/Llama-3.2-3B-Instruct`| 3B   | INT4  | ★★★★☆   | 40–50 t/s           | Fast chat, edge             |
-| Gemma 2 9B       | `google/gemma-2-9b-it`            | 9B   | INT4  | ★★★★★   | 20–30 t/s           | Reasoning, math             |
-| Phi-3.5 Mini     | `microsoft/Phi-3.5-mini-instruct` | 3.8B | INT4  | ★★★★☆   | 35–45 t/s           | Efficient, high quality     |
-| Qwen 2.5 7B      | `Qwen/Qwen2.5-7B-Instruct`        | 7B   | INT4  | ★★★★★   | 25–35 t/s           | Multilingual, strong        |
+| Llama 3.3 8B Instruct | `meta-llama/Llama-3.3-8B-Instruct` | 8B  | INT4  | ★★★★★   | Strong general/chat model       |
+| Qwen3 7B Instruct | `Qwen/Qwen3-7B-Instruct`    | 7B  | INT4  | ★★★★★   | Multilingual, coding, reasoning |
+| Mistral-Nemo 12B Instruct | `mistralai/Mistral-Nemo-Instruct-2407` | 12B  | INT4  | ★★★★☆   | Multilingual, efficient reasoning  |
+| DeepSeek-R1 Qwen3 8B | `deepseek-ai/DeepSeek-R1-0528-Qwen3-8B` | 8B | INT4 | ★★★★★ | Advanced reasoning, best mid-sized model |
+| Phi-4 Mini       | `microsoft/phi-4-mini`           | 3.8B| INT4  | ★★★★☆   | Efficient, strong general       |
+| TinyLlama 1.1B Chat | `TinyLlama/TinyLlama-1.1B-Chat-v1.0` | 1.1B | INT4 | ★★★☆☆ | Very small, edge deployment     |
 
 ### Using the Dolphin3-ov example
 
@@ -145,10 +146,10 @@ This repository includes a `Dolphin3-ov/` folder as a concrete example of a prep
 
 ```bash
 optimum-cli export openvino \
-  --model ./models/llama-3.2-3b-instruct-q4_k_m.gguf \
+  --model ./models/llama-3.3-8b-instruct-q4_k_m.gguf \
   --task text-generation-with-past \
   --weight-format int4 \
-  Llama3.2-3B-gguf-ov
+  Llama3.3-8B-gguf-ov
 ```
 
 - However, GGUF → IR may lose metadata; prefer exporting directly from the original Hugging Face model.
@@ -157,7 +158,7 @@ optimum-cli export openvino \
 
 ## Serve an OpenVINO model with vLLM
 
-Once you have an exported OpenVINO model directory (e.g. `Dolphin3-ov`, `Llama3.2-3B-ov`), start the vLLM OpenAI-compatible server.
+Once you have an exported OpenVINO model directory (e.g. `Dolphin3-ov`, `Llama3.3-8B-ov`), start the vLLM OpenAI-compatible server.
 
 ### Generic serving command
 
@@ -207,7 +208,7 @@ This configuration has been validated on Arch Linux + Intel Core Ultra 7 258V (L
    - API Key: leave blank or a dummy if required
 2. Models → Add Custom Model:
    - Connection: `vLLM-OpenVINO`
-   - Model ID: name matching the `--model` you serve (e.g. `Dolphin3-ov`, `Llama3.2-3B-ov`)
+   - Model ID: name matching the `--model` you serve (e.g. `Dolphin3-ov`, `Llama3.3-8B-ov`)
 
 ### Other OpenAI-compatible clients
 
@@ -257,7 +258,7 @@ VLLM_OPENVINO_KVCACHE_SPACE=100 \
 VLLM_OPENVINO_KV_CACHE_PRECISION=u8 \
 VLLM_OPENVINO_ENABLE_QUANTIZED_WEIGHTS=ON \
 python3 vllm/benchmarks/benchmark_throughput.py \
-  --model meta-llama/Llama-2-7b-chat-hf \
+  --model meta-llama/Llama-3.3-8B-Instruct \
   --dataset vllm/benchmarks/ShareGPT_V3_unfiltered_cleaned_split.json \
   --enable-chunked-prefill \
   --max-num-batched-tokens 256
@@ -279,7 +280,7 @@ VLLM_OPENVINO_DEVICE=GPU \
 VLLM_OPENVINO_KV_CACHE_PRECISION=i8 \
 VLLM_OPENVINO_ENABLE_QUANTIZED_WEIGHTS=ON \
 python3 vllm/benchmarks/benchmark_throughput.py \
-  --model meta-llama/Llama-2-7b-chat-hf \
+  --model meta-llama/Llama-3.3-8B-Instruct \
   --dataset vllm/benchmarks/ShareGPT_V3_unfiltered_cleaned_split.json
 ```
 
